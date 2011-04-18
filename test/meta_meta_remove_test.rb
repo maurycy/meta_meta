@@ -11,6 +11,16 @@ class MetaMetaRemoveTest < Test::Unit::TestCase
     assert_equal 0, limbo.toll
   end
   
+  def test_remove_twice
+    assert_nothing_raised do
+      2.times { Limbo.chain.remove(:yakshemash) }
+    end
+    
+    limbo = Limbo.new
+
+    assert ! limbo.class.method_defined?(:yakshemash)
+  end
+  
   def test_remove_array
     Limbo.chain.remove([:yakshemash, :p, :m])
 
@@ -35,7 +45,7 @@ class MetaMetaRemoveTest < Test::Unit::TestCase
   
   def test_remove_revert
     Limbo.chain.remove(:yakshemash)
-    Limbo.chain.flush
+    Limbo.chain.flush!
     
     limbo = Limbo.new
     
@@ -45,7 +55,7 @@ class MetaMetaRemoveTest < Test::Unit::TestCase
   
   def test_remove_revert_array
     Limbo.chain.remove([:yakshemash, :p, :m])
-    Limbo.chain.flush
+    Limbo.chain.flush!
 
     limbo = Limbo.new
     
@@ -55,7 +65,7 @@ class MetaMetaRemoveTest < Test::Unit::TestCase
   
   def test_remove_revert_implicit_array
     Limbo.chain.remove(:yakshemash, :p, :m)
-    Limbo.chain.flush
+    Limbo.chain.flush!
 
     limbo = Limbo.new
     
@@ -63,7 +73,7 @@ class MetaMetaRemoveTest < Test::Unit::TestCase
     assert_equal 0, limbo.toll
   end
   
-  def test_remove_with_class_overwrite
+  def test_remove_lazy_class
     Limbo.chain.remove(:yakshemash, :p, :m)
     Limbo.class_eval do
       def yakshemash
@@ -77,7 +87,7 @@ class MetaMetaRemoveTest < Test::Unit::TestCase
     assert_equal 0, limbo.toll
   end
   
-  def test_remove_with_instance_overwrite
+  def test_remove_lazy_instance
     Limbo.chain.remove(:yakshemash, :p, :m)
 
     limbo, dante = Limbo.new, Limbo.new

@@ -1,6 +1,9 @@
 source "http://rubygems.org"
 
-gem 'ruby-debug'
+group(:development) do
+  gem 'ruby-debug'
+  gem 'ruby-prof'
+end
 
 # Specify your gem's dependencies in meta_meta.gemspec
 gemspec

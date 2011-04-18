@@ -1,6 +1,9 @@
 *.gem
+*.gemspec
 .bundle
 Gemfile.lock
 pkg/*
 README.rdoc
 TODO
+coverage/*
+test/prof/*

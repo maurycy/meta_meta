@@ -1,7 +1,7 @@
 # TODO: require 'chain/state'
 # TODO: require 'chain/mark'
 # TODO: require 'chain/overwrite'
-# TODO: require 'chain/my'
+require 'meta_meta/chain/mine'
 
 module MetaMeta
   class Chain
@@ -20,14 +20,14 @@ module MetaMeta
     end
 
     def before(name, *args)
-      # Add the before_method before all other methods in the queue.
+      # Add before all others in the queue.
       prepare(name).tap {|q| q.insert(0, *args).flatten!}
       overwrite_if_defined(name)
       nil
     end
 
     def after(name, *args)
-      # Add the before_method after all other methods in the queue.
+      # Add after all others in the queue.
       prepare(name).tap {|q| q.push(*args).flatten!}
       overwrite_if_defined(name)
       nil
@@ -51,35 +51,41 @@ module MetaMeta
       (archive[name] ||= {}).tap do |a|
         a[:kept] = (base.method_defined?(name) ? keep(name) : nil)
       end
-      
-      base.class_eval { remove_method(name) }
+
+      # XXX: remove_method_if_defined(name)
+      base.send(:remove_method, name) if base.method_defined?(name)
       nil
     end
     
-    def flush
-      # Restore all randomized methods.
+    def flush!
       queue.each do |name, methods|
+        # Remove the overwritten method.
+        base.send(:remove_method, name) if base.method_defined?(name)
+
+        # Restore the overwritten method.
         methods.select {|m| m.is_a?(UnboundMethod) }.tap do |a|
-          a.each {|m| base.class_eval { alias_method(name, m.name.to_sym) }}
+          a.each {|m| base.send(:define_method, name, m) }
         end
       end
       
       # Restore all removed methods.
       archive.each do |name, details|
-        next unless details.has_key?(:kept)
-        base.class_eval { alias_method(name, details.fetch(:kept).name) }
+        # Remove the overwritten method.
+        base.send(:remove_method, name) if base.method_defined?(name)
+
+        # Restore the removed method.
+        m = details.fetch(:kept, nil)
+        base.send(:define_method, name, m) unless m.nil?
       end
-      
+
       # Zero the attributes.
       self.queue, self.archive, self.marks = {}, {}, [] # XXX: DRY #new
       true
     end
     
-    def merge(other)
-      # TODO
-    end
-
     protected
+      include Mine
+    
       def mark!(name, prefix=nil)
         name = [prefix, name].join("_") unless prefix.nil?
         
@@ -94,6 +100,23 @@ module MetaMeta
         ret = marks.include?(name)
         ret ? marks.reject! {|k,v| k.eql?(name)} : nil
         ret == true
+      end
+
+      # TODO: block_given?
+      def overwrite(name)
+        base.send(:remove_method, name) if base.method_defined?(name)
+        
+        # Overwrite the method.
+        base.send(:define_method, name) do |*args, &blk|
+          self.class.chain.send(:my_method, self, name, *args, &blk)
+        end
+        
+        true
+      end
+    
+      # Overwrite a defined method.
+      def overwrite_if_defined(name)
+        overwrite(name) if base.method_defined?(name)
       end
     
       # Store the method, if already defined.
@@ -114,103 +137,13 @@ module MetaMeta
         nil
       end
 
-      # TODO: block_given?
-      def overwrite(name)
-        # Remove the method if already defined.
-        base.send(:remove_method, name) if unmark!(name, :my_method)
-        
-        # Mark name with my_method.
-        mark!(name, :my_method)
-        
-        # Overwrite the method.
-        base.send(:define_method, name) do |*args, &blk|
-          self.class.chain.send(:my_method, self, name, *args, &blk)
-        end
-        
-        true
-      end
-    
-      # Overwrite a defined method.
-      def overwrite_if_defined(name)
-        overwrite(name) if base.method_defined?(name)
-      end
-
-      # XXX: must be fast
-      # XXX: super goes to the method, not #my_method?
-      def my_method(instance, name, *args, &blk)
-        a, q = state(name)
-        raise(ScriptError, 'BUG') if [a, q].all?(&:nil?)
-
-        ret = nil
-
-        if q.empty?
-          rm = a[:replace_method]
-          ret = base.instance_method(rm).bind(instance).call(*args, &blk)
-          return ret
-        end
-
-        q.each do |m|
-          # Scope to String, to avoid #is_a? mismatches.
-          case m.class.name
-          when "NilClass"
-            # It tortured by #replace, if nil.
-            rm = a[:replace_method]
-            ret = base.instance_method(rm).bind(instance).call(*args, &blk)
-          when "UnboundMethod"
-            ret = m.bind(instance).call(*args, &blk)
-          when "Proc"
-            instance.instance_eval(&m)
-          when "Symbol"
-            base.instance_method(m).bind(instance).call(*args, &blk)
-          else
-            raise(ScriptError, 'BUG')
-          end
-        end
-
-        ret
-      end
-
-      def my_method_added(ego, name)
-        # Do nothing if method unknown.
-        a, q = state(name)
-        return true if [a, q].all?(&:nil?)
-
-        # Replace the old method, and replace with the current method.
-        a[:kept] = keep(name) unless a.nil?
-        
-        # Remove the old methods, if it's overwrite, and replace nil with
-        # the current method.
-        q.map! {|m| m.nil? || m.is_a?(UnboundMethod) ? keep(name) : m}
-
-        true
-      end
-      
-      def my_method_removed(instance, name)
-        # TODO
-      end
-      
-      def my_method_undefined(instance, name)
-        # TODO
-      end
-      
-      def my_singleton_method_added(instance, name)
-        # TODO
-      end
-      
-      def my_singleton_method_removed(instance, name)
-        # TODO
-      end
-      
-      def my_singleton_method_undefined(instance, name)
-        # TODO
-      end
-      
       # Hide method with a random unique name, and return an UnboundMethod
       # object. Raise an exception if method undefined.
       #--
       # alias_method raises an exception if method undefined.
       #++
       def keep(name)
+        # FIXME: random makes uneasy read
         random_name = rand(36**16).to_s(36) # FIXME: uniqueness
         base.class_eval { alias_method(random_name, name) }
         base.instance_method(random_name)

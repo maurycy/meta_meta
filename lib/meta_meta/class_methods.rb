@@ -8,7 +8,7 @@ module MetaMeta
 
       # Remove all overwritten methods every time.
       v = class_variable_get(ch)
-      class_variable_get(ch).flush unless v.nil?
+      class_variable_get(ch).flush! unless v.nil?
       
       # Return the current chain eventually.
       class_variable_set(ch, obj)
