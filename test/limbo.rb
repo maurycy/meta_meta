@@ -1,4 +1,4 @@
-class MetaMetaTest::Limbo
+class Limbo
   attr_accessor :toll
   
   def initialize
