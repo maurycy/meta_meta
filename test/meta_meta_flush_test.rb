@@ -33,4 +33,30 @@ class MetaMetaFlushTest < Test::Unit::TestCase
 
     assert_equal '#winning', limbo.yakshemash
   end
+  
+  def test_replace_defined
+    Limbo.chain.replace(:yakshemash, :anunhappy)
+    Limbo.class_eval do
+      def yakshemash; :an_unhappy_birthday; end
+      def yakshemash; :you_lie; end
+    end
+    Limbo.chain.flush!
+    
+    Limbo.new.tap do |limbo|
+      assert_equal :you_lie, limbo.yakshemash
+    end
+  end
+  
+  def test_replace_undefined
+    Limbo.chain.replace(:the_smiths, :behind)
+    Limbo.class_eval do
+      def the_smiths; :an_unhappy_birthday; end
+      def the_smiths; :you_lie; end
+    end
+    Limbo.chain.flush!
+    
+    Limbo.new.tap do |limbo|
+      assert_equal :you_lie, limbo.the_smiths
+    end
+  end
 end
