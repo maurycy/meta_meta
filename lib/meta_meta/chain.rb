@@ -1,162 +1,137 @@
-# TODO: require 'chain/state'
-# TODO: require 'chain/mark'
-# TODO: require 'chain/overwrite'
-require 'meta_meta/chain/mine'
-
 module MetaMeta
   class Chain
-    attr_accessor :archive, :base, :marks, :queue
+    attr_accessor :archive, :base, :queue, :stored, :referenced, :aliased
+    
+    def i_suck(foo=nil)
+      # XXX: self.foo= v. @foo= ???
+      self.base = foo unless foo.nil?
+      self.queue = {}
+      self.stored = {}
+      self.referenced = {}
+      self.aliased = []
+    end
     
     def initialize(base, &blk)
-      # XXX: self.foo= v. @foo= ???
-      self.base, self.queue, self.archive, self.marks = base, {}, {}, []
+      i_suck(base)
 
-      # First, overwrite methods called by Ruby once the class changes.
-      overwrite_callbacks!
-
-      # The, set up within the initialize's block.
-      # http://www.ruby-doc.org/core-1.8.7/classes/Object.html#M000005
+      # Set up within a block.
       instance_eval(&blk) if block_given?
     end
-
+    
+    # Update the queue. Then, do nothing if method undefined. Otherwise, if
+    # first time, rename it and alias with my_method.
+    
     def before(name, *args)
-      # Add before all others in the queue.
-      prepare(name).tap {|q| q.insert(0, *args).flatten!}
-      overwrite_if_defined(name)
-      nil
+      return self unless base.method_defined?(name)
+      
+      (queue[name] ||= [nil]).insert(0, *args).flatten!
+      
+      return self if stored.has_key?(name)
+
+      referenced[name] = store(name)
+
+      base.send(:define_method, name) do |*args, &blk|
+        self.class.chain.send(:my_method, self, name, *args, &blk)
+      end
+      
+      self
     end
 
     def after(name, *args)
-      # Add after all others in the queue.
-      prepare(name).tap {|q| q.push(*args).flatten!}
-      overwrite_if_defined(name)
-      nil
-    end
+      return self unless base.method_defined?(name)
+      
+      (queue[name] ||= [nil]).push(*args).flatten!
+      
+      return self if stored.has_key?(name)
 
-    def replace(name, replace_method)
-      (archive[name] ||= {}).tap do |a|
-        a[:kept] = (base.method_defined?(name) ? keep(name) : nil)
-        a[:replace_method] = replace_method
+      referenced[name] = store(name)
+
+      base.send(:define_method, name) do |*args, &blk|
+        self.class.chain.send(:my_method, self, name, *args, &blk)
       end
       
-      overwrite_if_defined(name)
-      nil
+      self
     end
 
+
+    def replace(name, replace)
+      return self unless base.method_defined?(name)
+      return self     if stored.has_key?(name)
+      
+      queue[name] ||= [nil]
+      referenced[name] = replace
+      
+      base.send(:define_method, name) do |*args, &blk|
+        self.class.chain.send(:my_method, self, name, *args, &blk)
+      end
+      
+      self
+    end
+    
     def remove(*args)
       args.flatten!
       name = args.shift
       args.each {|arg| remove(arg)} if args.any?
-      
-      (archive[name] ||= {}).tap do |a|
-        a[:kept] = (base.method_defined?(name) ? keep(name) : nil)
-      end
 
-      # XXX: remove_method_if_defined(name)
-      base.send(:remove_method, name) if base.method_defined?(name)
-      nil
+      referenced[name] = nil
+      return self     if stored.has_key?(name)
+      return self unless base.method_defined?(name)
+      store(name)
+      
+      base.send(:remove_method, name)
+      self
     end
     
     def flush!
-      queue.each do |name, methods|
-        # Remove the overwritten method.
-        base.send(:remove_method, name) if base.method_defined?(name)
-
-        # Restore the overwritten method.
-        methods.select {|m| m.is_a?(UnboundMethod) }.tap do |a|
-          a.each {|m| base.send(:define_method, name, m) }
-        end
-      end
-      
-      # Restore all removed methods.
-      archive.each do |name, details|
-        # Remove the overwritten method.
-        base.send(:remove_method, name) if base.method_defined?(name)
-
-        # Restore the removed method.
-        m = details.fetch(:kept, nil)
-        base.send(:define_method, name, m) unless m.nil?
+      stored.each do |name, random_name|
+        base.method_defined?(random_name) || fail('BUG')
+        base.method_defined?(name) && base.send(:remove_method, name)
+        base.class_eval { alias_method(name, random_name) }
       end
 
-      # Zero the attributes.
-      self.queue, self.archive, self.marks = {}, {}, [] # XXX: DRY #new
-      true
+      i_suck
+      self
     end
     
     protected
-      include Mine
-    
-      def mark!(name, prefix=nil)
-        name = [prefix, name].join("_") unless prefix.nil?
-        
-        ret = marks.include?(name)
-        ret ? marks.insert(0, name) : nil
-        ret == false
-      end
-      
-      def unmark!(name, prefix=nil)
-        name = [prefix, name].join("_") unless prefix.nil?
-        
-        ret = marks.include?(name)
-        ret ? marks.reject! {|k,v| k.eql?(name)} : nil
-        ret == true
+      def store(name)
+        stored.has_key?(name) && fail('BUG')
+        keep(name).tap {|random_name| stored[name] = random_name }
       end
 
-      # TODO: block_given?
-      def overwrite(name)
-        base.send(:remove_method, name) if base.method_defined?(name)
-        
-        # Overwrite the method.
-        base.send(:define_method, name) do |*args, &blk|
-          self.class.chain.send(:my_method, self, name, *args, &blk)
-        end
-        
-        true
-      end
-    
-      # Overwrite a defined method.
-      def overwrite_if_defined(name)
-        overwrite(name) if base.method_defined?(name)
-      end
-    
-      # Store the method, if already defined.
-      def prepare(name)
-        (queue[name] ||= []).tap do |q|
-          q << (base.method_defined?(name) ? keep(name) : nil) if q.empty?
-        end
-      end
-
-      def overwrite_callbacks! # XXX: rename
-        # Overwrite #method_added.
-        base.class_eval do
-          def self.method_added(*args, &blk)
-            self.chain.send(:my_method_added, self, *args, &blk)
-          end
-        end
-        
-        nil
-      end
-
-      # Hide method with a random unique name, and return an UnboundMethod
-      # object. Raise an exception if method undefined.
+      # Hide method with a random unique name, and return the name. Raise an
+      # exception if method undefined.
       #--
-      # alias_method raises an exception if method undefined.
+      # FIXME: random makes uneasy read
+      # FIXME: it cannot include numbers
       #++
       def keep(name)
-        # FIXME: random makes uneasy read
-        random_name = rand(36**16).to_s(36) # FIXME: uniqueness
-        base.class_eval { alias_method(random_name, name) }
-        base.instance_method(random_name)
+        ('a' + rand(36**16).to_s(36)).to_sym.tap do |random_name|
+          base.method_defined?(random_name) && fail('BUG')
+          base.class_eval { alias_method(random_name, name) }
+        end
       end
+      
+      # XXX: Kernel#__method__ broken
+      # XXX: must be fast
+      # XXX: super goes to the method, not #my_method?
+      def my_method(instance, name, *args, &blk)
+        ref, ret = referenced[name], nil
 
-      # FIXME
-      def state(name)
-        a, q = (archive[name] || {}), (queue[name] || [])
+        (queue[name] ||= [nil]).each do |m|
+          lret = case m.class.name.to_sym
+          when :NilClass
+            base.instance_method(ref).bind(instance).call(*args, &blk)
+          when :Proc
+            instance.instance_eval(&m)
+          when :String, :Symbol
+            base.instance_method(m).bind(instance).call(*args, &blk)
+          end
 
-        return([]) if [a, q].all?(&:nil?)
-        return([]) if [a, q].all?(&:empty?)
-        
-        [a, q]
+          ret = lret if m.eql?(ref) || m.nil?
+        end
+
+        ret
       end
   end
 end

@@ -10,7 +10,7 @@ class MetaMetaTest < Test::Unit::TestCase
     load 'limbo.rb'
     
     Limbo.class_eval { include(MetaMeta) }
-    Limbo.chain.flush
+    Limbo.chain.flush!
   end
 
   def test_initialize

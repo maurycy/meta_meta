@@ -66,18 +66,4 @@ class MetaMetaBeforeTest < Test::Unit::TestCase
     assert_equal '#winning', limbo.yakshemash
     assert_equal 0, limbo.toll
   end
-  
-  def test_before_with_class_overwrite
-    Limbo.chain.before(:happiness, [:p, :p, :p])
-    Limbo.class_eval do
-      def happiness
-        '#happiness'
-      end
-    end
-    
-    limbo = Limbo.new
-    
-    assert_equal '#happiness', limbo.happiness
-    assert_equal 3, limbo.toll
-  end
 end

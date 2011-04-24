@@ -9,7 +9,7 @@ class MetaMetaFlushTest < Test::Unit::TestCase
   end
 
   def test_class_before
-    Limbo.chain.before(:yakshemash, proc { raise(ScriptError) })
+    Limbo.chain.before(:yakshemash, proc { raise('hll,crlwrld') })
     Limbo.chain.flush!
     
     assert_nothing_raised do
